@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Escáner de Códigos de Barras</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="title">Escáner de Códigos de Barras</h1>
+            <div class="session-info">
+                <span class="session-id">ID: <span id="session-id">-</span></span>
+                <button id="reset-btn" class="reset-btn" title="Reiniciar sesión">
+                    <i class="fas fa-redo"></i>
+                </button>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="scanner-container">
+                <div class="scanner-view">
+                    <video id="video" autoplay playsinline></video>
+                    <canvas id="canvas" class="hidden"></canvas>
+                    <div class="scanner-overlay">
+                        <div class="scanner-line"></div>
+                    </div>
+                </div>
+                
+                <div class="scanner-controls">
+                    <button id="start-scan" class="btn primary-btn">
+                        <i class="fas fa-camera"></i>
+                        Iniciar Escaneo
+                    </button>
+                    <button id="stop-scan" class="btn secondary-btn" disabled>
+                        <i class="fas fa-stop"></i>
+                        Detener
+                    </button>
+                </div>
+            </div>
+
+            <div class="results-container">
+                <div class="scan-counter">
+                    <span class="counter-label">Códigos escaneados:</span>
+                    <span id="scan-count" class="counter-value">0</span>
+                </div>
+
+                <div class="last-scan">
+                    <span class="last-scan-label">Último código:</span>
+                    <span id="last-barcode" class="last-barcode-value">-</span>
+                </div>
+
+                <div class="action-buttons">
+                    <button id="next-btn" class="btn primary-btn" disabled>
+                        <i class="fas fa-arrow-right"></i>
+                        Próximo
+                    </button>
+                    <button id="finish-btn" class="btn danger-btn" disabled>
+                        <i class="fas fa-check"></i>
+                        Finalizar
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <div id="confirm-modal" class="modal">
+            <div class="modal-content">
+                <h3>Confirmar Finalización</h3>
+                <p>¿Estás seguro de que deseas finalizar el escaneo? Esta acción guardará todos los códigos escaneados.</p>
+                <div class="modal-buttons">
+                    <button id="confirm-finish" class="btn primary-btn">Confirmar</button>
+                    <button id="cancel-finish" class="btn secondary-btn">Cancelar</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="notification" class="notification"></div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.2/dist/quagga.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
