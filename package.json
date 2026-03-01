@@ -7,13 +7,11 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "express-session": "^1.17.3",
     "cors": "^2.8.5",
-    "connect-redis": "^7.1.0",  // <-- AÑADIR
-    "redis": "^4.6.10"           // <-- AÑADIR
+    "express": "^4.18.2",
+    "express-session": "^1.17.3"
   },
   "devDependencies": {
-    "quagga": "^0.12.1"
+    "quagga": "^0.6.16"
   }
 }

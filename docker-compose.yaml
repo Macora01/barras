@@ -4,11 +4,11 @@ services:
   barcode-scanner:
     build: .
     ports:
-      - "3007:3007"
+      - "3000:3000"
     environment:
       - NODE_ENV=production
       - SESSION_SECRET=${SESSION_SECRET}
-      - PORT=3007
+      - PORT=3000
     volumes:
       - ./data:/app/data
     restart: unless-stopped
