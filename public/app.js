@@ -1,272 +1,120 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // Elementos del DOM
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const startScanBtn = document.getElementById('start-scan');
-    const stopScanBtn = document.getElementById('stop-scan');
-    const nextBtn = document.getElementById('next-btn');
-    const finishBtn = document.getElementById('finish-btn');
-    const scanCount = document.getElementById('scan-count');
-    const lastBarcode = document.getElementById('last-barcode');
-    const sessionId = document.getElementById('session-id');
-    const resetBtn = document.getElementById('reset-btn');
-    const confirmModal = document.getElementById('confirm-modal');
-    const confirmFinishBtn = document.getElementById('confirm-finish');
-    const cancelFinishBtn = document.getElementById('cancel-finish');
-    const notification = document.getElementById('notification');
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const cors = require('cors');
+const session = require('express-session');
+
+const app = express();
+const PORT = process.env.PORT || 3007;
+
+// --- CAMBIO 1: Configurar CORS para permitir cookies ---
+// Esto es fundamental para que el navegador envíe la cookie de sesión
+app.use(cors({
+    credentials: true // Permite el envío de cookies y encabezados de autenticación
+}));
+
+app.use(express.json());
+app.use(express.static('public'));
+
+// --- CAMBIO 2: Mejorar la configuración de la sesión para móviles ---
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'secreto-por-defecto-cambiar-en-produccion',
+    resave: false,
+    saveUninitialized: true,
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production', // Requiere HTTPS en producción
+        httpOnly: true, // Evita que el cliente (JavaScript) acceda a la cookie
+        sameSite: 'lax', // ¡LA CLAVE! Permite que la cookie se envíe en navegaciones del mismo sitio
+        maxAge: 24 * 60 * 60 * 1000 // 24 horas
+    }
+}));
+
+// Directorio para datos
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+}
+
+// Rutas API
+app.get('/api/session', (req, res) => {
+    // Log para depuración
+    console.log(`[SESSION GET] ID: ${req.sessionID}, UserID: ${req.session.userId || 'N/A'}`);
     
-    // Variables de estado
-    let isScanning = false;
-    let scannedCodes = [];
-    let lastScannedCode = null;
-    let scanTimeout = null;
-    let currentSessionId = null;
-    let isSessionReady = false; // <-- NUEVA VARIABLE DE ESTADO
-    
-    // Inicializar sesión
-    function initSession() {
-        fetch('/api/session')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('No se pudo inicializar la sesión.');
-                }
-                return response.json();
-            })
-            .then(data => {
-                currentSessionId = data.userId;
-                sessionId.textContent = currentSessionId.substring(0, 8) + '...';
-                scanCount.textContent = data.count || 0;
-                isSessionReady = true; // <-- MARCAR COMO LISTA
-                startScanBtn.disabled = false; // <-- HABILITAR BOTÓN
-            })
-            .catch(error => {
-                console.error('Error al inicializar sesión:', error);
-                showNotification('Error al inicializar la aplicación. Recargando...', 'error');
-                // Recargar la página si la sesión falla al iniciar
-                setTimeout(() => location.reload(), 2000);
-            });
+    if (!req.session.userId) {
+        req.session.userId = 'user_' + Math.random().toString(36).substr(2, 9);
+        req.session.scanCount = 0;
+        console.log(`[SESSION GET] Creado nuevo UserID: ${req.session.userId}`);
     }
     
-    // Event Listeners
-    startScanBtn.addEventListener('click', startScanning);
-    stopScanBtn.addEventListener('click', stopScanning);
-    nextBtn.addEventListener('click', handleNext);
-    finishBtn.addEventListener('click', showFinishConfirmation);
-    confirmFinishBtn.addEventListener('click', finishScanning);
-    cancelFinishBtn.addEventListener('click', hideFinishConfirmation);
-    resetBtn.addEventListener('click', resetSession);
+    res.json({ 
+        userId: req.session.userId,
+        scanCount: req.session.scanCount || 0
+    });
+});
+
+app.post('/api/save-barcode', (req, res) => {
+    // Log para depuración
+    console.log(`[SAVE POST] ID: ${req.sessionID}, UserID: ${req.session.userId || 'N/A'}`);
+
+    if (!req.session || !req.session.userId) {
+        console.error(`[SAVE ERROR] Sesión no válida. SessionID: ${req.sessionID}`);
+        return res.status(401).json({ success: false, message: 'Sesión no válida o no iniciada.' });
+    }
+
+    const { barcode } = req.body;
     
-    // Función para iniciar el escaneo
-    function startScanning() {
-        if (!isSessionReady) {
-            showNotification('La sesión no está lista. Por favor, espere.', 'warning');
-            return;
-        }
-        // Solicitar permisos de cámara
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-            .then(stream => {
-                video.srcObject = stream;
-                video.setAttribute('playsinline', true);
-                video.play();
-                
-                // Configurar Quagga
-                Quagga.init({
-                    inputStream: {
-                        name: "Live",
-                        type: "LiveStream",
-                        target: video
-                    },
-                    decoder: {
-                        readers: [
-                            "code_128_reader",
-                            "ean_reader",
-                            "ean_8_reader",
-                            "code_39_reader",
-                            "code_39_vin_reader",
-                            "codabar_reader",
-                            "upc_reader",
-                            "upc_e_reader",
-                            "i2of5_reader"
-                        ]
-                    }
-                }, function(err) {
-                    if (err) {
-                        console.error('Error al inicializar Quagga:', err);
-                        showNotification('Error al iniciar la cámara: ' + err.message, 'error');
-                        return;
-                    }
-                    
-                    Quagga.start();
-                    isScanning = true;
-                    startScanBtn.disabled = true;
-                    stopScanBtn.disabled = false;
-                    
-                    // Escuchar detecciones de códigos de barras
-                    Quagga.onDetected(onBarcodeDetected);
-                });
-            })
-            .catch(err => {
-                console.error('Error al acceder a la cámara:', err);
-                showNotification('Error al acceder a la cámara: ' + err.message, 'error');
-            });
+    if (!barcode) {
+        return res.status(400).json({ success: false, message: 'Código de barras requerido' });
     }
     
-    // Función para detener el escaneo
-    function stopScanning() {
-        if (isScanning) {
-            Quagga.stop();
-            
-            // Detener el stream de video
-            const stream = video.srcObject;
-            if (stream) {
-                const tracks = stream.getTracks();
-                tracks.forEach(track => track.stop());
-            }
-            
-            video.srcObject = null;
-            isScanning = false;
-            startScanBtn.disabled = !isSessionReady; // <-- El botón depende de la sesión
-            stopScanBtn.disabled = true;
-        }
-    }
+    // Obtener fecha actual
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
     
-    // Función para manejar la detección de códigos de barras
-    function onBarcodeDetected(result) {
-        const code = result.codeResult.code;
-        
-        // Evitar escaneos duplicados del mismo código
-        if (code === lastScannedCode) {
-            return;
+    // Nombre del archivo CSV
+    const filename = `barcodes_${dateStr}_${req.session.userId.substring(0, 8)}.csv`;
+    const filepath = path.join(dataDir, filename);
+    
+    // Crear archivo si no existe
+    let fileExists = fs.existsSync(filepath);
+    
+    // Escribir en el archivo CSV
+    const csvData = `${now.toISOString()},${barcode}\n`;
+    
+    try {
+        if (fileExists) {
+            fs.appendFileSync(filepath, csvData);
+        } else {
+            fs.writeFileSync(filepath, 'timestamp,barcode\n' + csvData);
         }
         
-        // Actualizar el último código escaneado
-        lastScannedCode = code;
-        lastBarcode.textContent = code;
+        // Actualizar contador en sesión
+        req.session.scanCount = (req.session.scanCount || 0) + 1;
         
-        // Agregar a la lista de códigos escaneados
-        scannedCodes.push(code);
-        
-        // Guardar el código en el servidor
-        saveBarcode(code);
-        
-        // Habilitar botones
-        nextBtn.disabled = false;
-        finishBtn.disabled = false;
-        
-        // Limpiar el último código escaneado después de 2 segundos
-        if (scanTimeout) {
-            clearTimeout(scanTimeout);
-        }
-        scanTimeout = setTimeout(() => {
-            lastScannedCode = null;
-        }, 2000);
-        
-        // Mostrar notificación
-        showNotification(`Código escaneado: ${code}`, 'success');
+        console.log(`[SAVE SUCCESS] Código guardado. Contador: ${req.session.scanCount}`);
+        res.json({ success: true, filename, count: req.session.scanCount });
+    } catch (error) {
+        console.error('Error al guardar:', error);
+        res.status(500).json({ success: false, message: 'Error al guardar el código' });
     }
-    
-    // Función para guardar un código de barras
-    function saveBarcode(code) {
-        fetch('/api/save-barcode', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ barcode: code })
-        })
-        .then(response => {
-            if (!response.ok) {
-                // Si el error es 401, la sesión no es válida
-                if (response.status === 401) {
-                    throw new Error('SESSION_INVALID');
-                }
-                throw new Error('Error del servidor al guardar.');
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (data.success) {
-                scanCount.textContent = data.count;
-                console.log('Código guardado en:', data.filename);
-            } else {
-                throw new Error(data.message || 'Error al guardar el código');
-            }
-        })
-        .catch(error => {
-            console.error('Error al guardar el código:', error);
-            // MANEJO ESPECÍFICO PARA SESIÓN INVÁLIDA
-            if (error.message === 'SESSION_INVALID') {
-                showNotification('La sesión ha expirado. Recargando la aplicación...', 'error');
-                stopScanning(); // Detener el escaneo
-                setTimeout(() => location.reload(), 2500); // Recargar la página
-            } else {
-                showNotification('Error al guardar el código: ' + error.message, 'error');
-            }
-        });
-    }
-    
-    // ... (el resto de las funciones como handleNext, finishScanning, etc. permanecen igual)
-    function handleNext() {
-        lastBarcode.textContent = '-';
-        lastScannedCode = null;
-        showNotification('Listo para escanear el siguiente código', 'info');
-    }
-    
-    function showFinishConfirmation() {
-        confirmModal.style.display = 'flex';
-    }
-    
-    function hideFinishConfirmation() {
-        confirmModal.style.display = 'none';
-    }
-    
-    function finishScanning() {
-        stopScanning();
-        hideFinishConfirmation();
-        
-        scannedCodes = [];
-        lastBarcode.textContent = '-';
-        
-        nextBtn.disabled = true;
-        finishBtn.disabled = true;
-        
-        showNotification('Escaneo finalizado. Los datos han sido guardados.', 'success');
-    }
-    
-    function resetSession() {
-        fetch('/api/reset-session', {
-            method: 'POST'
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                scanCount.textContent = data.count;
-                scannedCodes = [];
-                lastBarcode.textContent = '-';
-                nextBtn.disabled = true;
-                finishBtn.disabled = true;
-                showNotification('Sesión reiniciada correctamente', 'success');
-            }
-        })
-        .catch(error => {
-            console.error('Error al reiniciar sesión:', error);
-            showNotification('Error al reiniciar sesión', 'error');
-        });
-    }
-    
-    function showNotification(message, type = 'info') {
-        notification.textContent = message;
-        notification.className = 'notification ' + type;
-        notification.classList.add('show');
-        
-        setTimeout(() => {
-            notification.classList.remove('show');
-        }, 3000);
-    }
-    
-    // Inicializar la aplicación
-    initSession();
-    
-    // Deshabilitar el botón de escaneo hasta que la sesión esté lista
-    startScanBtn.disabled = true; 
+});
+
+app.post('/api/reset-session', (req, res) => {
+    req.session.scanCount = 0;
+    res.json({ success: true, count: 0 });
+});
+
+// Servir la aplicación principal
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Manejar rutas no encontradas
+app.use((req, res) => {
+    res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor iniciado en el puerto ${PORT}`);
+    console.log(`Entorno: ${process.env.NODE_ENV || 'development'}`);
 });
