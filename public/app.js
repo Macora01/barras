@@ -21,19 +21,29 @@ document.addEventListener('DOMContentLoaded', function() {
     let lastScannedCode = null;
     let scanTimeout = null;
     let currentSessionId = null;
+    let isSessionReady = false; // <-- NUEVA VARIABLE DE ESTADO
     
     // Inicializar sesión
     function initSession() {
         fetch('/api/session')
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('No se pudo inicializar la sesión.');
+                }
+                return response.json();
+            })
             .then(data => {
                 currentSessionId = data.userId;
                 sessionId.textContent = currentSessionId.substring(0, 8) + '...';
                 scanCount.textContent = data.count || 0;
+                isSessionReady = true; // <-- MARCAR COMO LISTA
+                startScanBtn.disabled = false; // <-- HABILITAR BOTÓN
             })
             .catch(error => {
                 console.error('Error al inicializar sesión:', error);
-                showNotification('Error al inicializar la aplicación', 'error');
+                showNotification('Error al inicializar la aplicación. Recargando...', 'error');
+                // Recargar la página si la sesión falla al iniciar
+                setTimeout(() => location.reload(), 2000);
             });
     }
     
@@ -48,6 +58,10 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Función para iniciar el escaneo
     function startScanning() {
+        if (!isSessionReady) {
+            showNotification('La sesión no está lista. Por favor, espere.', 'warning');
+            return;
+        }
         // Solicitar permisos de cámara
         navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
             .then(stream => {
@@ -111,7 +125,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             video.srcObject = null;
             isScanning = false;
-            startScanBtn.disabled = false;
+            startScanBtn.disabled = !isSessionReady; // <-- El botón depende de la sesión
             stopScanBtn.disabled = true;
         }
     }
@@ -160,7 +174,16 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             body: JSON.stringify({ barcode: code })
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                // Si el error es 401, la sesión no es válida
+                if (response.status === 401) {
+                    throw new Error('SESSION_INVALID');
+                }
+                throw new Error('Error del servidor al guardar.');
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.success) {
                 scanCount.textContent = data.count;
@@ -171,44 +194,45 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .catch(error => {
             console.error('Error al guardar el código:', error);
-            showNotification('Error al guardar el código: ' + error.message, 'error');
+            // MANEJO ESPECÍFICO PARA SESIÓN INVÁLIDA
+            if (error.message === 'SESSION_INVALID') {
+                showNotification('La sesión ha expirado. Recargando la aplicación...', 'error');
+                stopScanning(); // Detener el escaneo
+                setTimeout(() => location.reload(), 2500); // Recargar la página
+            } else {
+                showNotification('Error al guardar el código: ' + error.message, 'error');
+            }
         });
     }
     
-    // Función para manejar el botón "Próximo"
+    // ... (el resto de las funciones como handleNext, finishScanning, etc. permanecen igual)
     function handleNext() {
         lastBarcode.textContent = '-';
         lastScannedCode = null;
         showNotification('Listo para escanear el siguiente código', 'info');
     }
     
-    // Función para mostrar la confirmación de finalización
     function showFinishConfirmation() {
         confirmModal.style.display = 'flex';
     }
     
-    // Función para ocultar la confirmación de finalización
     function hideFinishConfirmation() {
         confirmModal.style.display = 'none';
     }
     
-    // Función para finalizar el escaneo
     function finishScanning() {
         stopScanning();
         hideFinishConfirmation();
         
-        // Reiniciar el contador y la lista de códigos
         scannedCodes = [];
         lastBarcode.textContent = '-';
         
-        // Deshabilitar botones
         nextBtn.disabled = true;
         finishBtn.disabled = true;
         
         showNotification('Escaneo finalizado. Los datos han sido guardados.', 'success');
     }
     
-    // Función para reiniciar la sesión
     function resetSession() {
         fetch('/api/reset-session', {
             method: 'POST'
@@ -230,7 +254,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Función para mostrar notificaciones
     function showNotification(message, type = 'info') {
         notification.textContent = message;
         notification.className = 'notification ' + type;
@@ -243,4 +266,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Inicializar la aplicación
     initSession();
+    
+    // Deshabilitar el botón de escaneo hasta que la sesión esté lista
+    startScanBtn.disabled = true; 
 });

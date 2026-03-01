@@ -5,7 +5,7 @@ const cors = require('cors');
 const session = require('express-session');
 
 const app = express();
-const PORT = process.env.PORT || 3007; // <-- CAMBIO AQUÍ
+const PORT = process.env.PORT || 3007;
 
 // Middleware
 app.use(cors());
@@ -42,6 +42,12 @@ app.get('/api/session', (req, res) => {
 });
 
 app.post('/api/save-barcode', (req, res) => {
+    // ¡COMPROBACIÓN DE SEGURIDAD AÑADIDA!
+    if (!req.session || !req.session.userId) {
+        console.error('Intento de guardar sin sesión activa.');
+        return res.status(401).json({ success: false, message: 'Sesión no válida o no iniciada.' });
+    }
+
     const { barcode } = req.body;
     
     if (!barcode) {
